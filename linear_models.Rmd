@@ -1,0 +1,35 @@
+---
+title: "linear models"
+author: "Kaila Boyer"
+date: "11/16/2021"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(p8105.datasets)
+
+set.seed(1)
+
+
+knitr::opts_chunk$set(
+  fig.width = 7,
+  fig.asp = .7,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis",
+  scale_colour_discrete = scale_colour_viridis_d,
+scale_fill_discrete = scale_fill_viridis_d
+)
+```
+
+```{r}
+
+```
+
