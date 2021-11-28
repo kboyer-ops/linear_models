@@ -1,0 +1,214 @@
+---
+title: "bootstrapping"
+author: "Kaila Boyer"
+date: "11/28/2021"
+output: github_document
+---
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(p8105.datasets)
+
+set.seed(1)
+
+knitr::opts_chunk$set(
+  fig.width = 7,
+  fig.asp = .7,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis",
+  scale_colour_discrete = scale_colour_viridis_d,
+scale_fill_discrete = scale_fill_viridis_d
+)
+```
+
+## Simulate a dataset 
+```{r}
+set.seed(1)
+n_samp = 250
+
+sim_df_const = tibble(
+  x = rnorm(n_samp, 1, 1), 
+  error = rnorm(n_samp, 0, 1), 
+  y = 2 + 3 * x + error
+)
+
+
+sim_df_nonconst = sim_df_const %>% 
+  mutate(error = error * 0.75 * x, 
+         y = 2 + 3 *x + error)
+```
+
+make a plot 
+
+```{r}
+sim_df_const %>% ggplot(aes(x = x, y = y)) + 
+  geom_point()
+
+sim_df_nonconst %>% ggplot(aes(x = x, y = y)) + 
+  geom_point()
+```
+
+```{r}
+sim_df_const %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy()
+
+sim_df_nonconst %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy()
+```
+
+implement a procedure to get better standard errors in cononst df
+## Let's try to use bootstrap for inference 
+
+```{r}
+bootstrap_sample <- sim_df_nonconst %>% 
+  sample_frac(size = 1, replace = T) %>% 
+  arrange(x)
+#some observations repeated, some not there at all 
+
+lm(y ~x, data = bootstrap_sample)
+```
+
+write a function 
+```{r}
+boot_sample = function(df) { 
+  
+  sample_frac(df, size = 1, replace = T)
+  }
+```
+
+make a tibble to keep track of things 
+```{r}
+bootstrap_df <- tibble(
+  strap_number = 1:1000, 
+  strap_sample = rerun(1000, boot_sample(sim_df_nonconst))
+)
+```
+
+from here, things are kinda the same as "always" 
+
+```{r}
+bootstrap_results <- bootstrap_df %>% 
+  mutate(
+    models = map(.x = strap_sample, ~lm(y ~ x, data = .x)), 
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results)
+
+bootstrap_results %>% 
+  ggplot(aes(x = estimate)) + 
+  geom_histogram() + 
+  facet_grid(~term, scales = "free")
+
+lm(y ~ x, data = sim_df_nonconst) %>% broom::tidy()
+
+bootstrap_results %>% 
+  group_by(term) %>% 
+  summarise(se = sd(estimate))
+```
+##using models
+
+My goal, of course, isn’t to analyze bootstrap samples by plotting them – I’d like to get a sense of the variability in estimated intercepts and slopes across all my bootstrap samples.
+
+To do that, I’ll use the analytic pipeline we established when looking at nested datasets in linear models: fit the model; tidy the output; unnest and examine the results. The code chunk below uses this pipeline to look at bootstrap standard errors for the estimated regression coefficients.
+```{r}
+bootstrap_results = 
+  bootstrap_df %>% 
+  mutate(
+    models = map(strap_sample, ~lm(y ~ x, data = .x) ),
+    results = map(models, broom::tidy)) %>% 
+  select(-strap_sample, -models) %>% 
+  unnest(results) 
+
+bootstrap_results %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate)) %>% 
+  knitr::kable(digits = 3)
+
+bootstrap_results %>% 
+  group_by(term) %>% 
+  summarize(
+    ci_lower = quantile(estimate, 0.025), 
+    ci_upper = quantile(estimate, 0.975))
+
+bootstrap_df %>% 
+  unnest(strap_sample) %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_line(aes(group = strap_number), stat = "smooth", method = "lm", se = FALSE, alpha = .1, color = "blue") +
+  geom_point(data = sim_df_nonconst, alpha = .5)
+```
+
+## Bootstrapping function 
+
+```{r}
+boostrap_df = 
+  sim_df_nonconst %>% 
+  modelr::bootstrap(n = 1000)
+
+
+#bootstrap_df$strap[[1]]  didnt work 
+boostrap_df[[1]][[1]]
+
+as_data_frame(boostrap_df[[1]][[1]])
+
+sim_df_nonconst %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~lm(y ~ x, data = .x) ),
+    results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+
+sim_df_const %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(models = map(strap, ~lm(y ~ x, data = .x) ),
+         results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+```
+
+## Practice with airbnb data
+
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    borough = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(borough != "Staten Island") %>% 
+  drop_na(price, stars) %>% 
+  select(price, stars, borough, neighborhood, room_type)
+
+
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price, color = room_type)) + 
+  geom_point()
+
+nyc_airbnb %>% 
+  filter(borough == "Manhattan") %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~ lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+  select(results) %>% 
+  unnest(results) %>% 
+  filter(term == "stars") %>% 
+  ggplot(aes(x = estimate)) + geom_density()
+```
+
